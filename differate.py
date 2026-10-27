@@ -18,6 +18,10 @@ Examples:
                 python differate.py diff -d /path/to/directory -c 5
         Convert and then compare the similarity between .py files in multiple directories:
                 python differate.py convert diff -d /path/to/dir1 -d /path/to/dir2 -z 2 -s /path/to/save/results
+        Compare files named "Name Surname_1.py" in one directory:
+                python differate.py diff -d /path/to/submissions
+        Unique parent-folder names are used when available; otherwise files are
+        identified by the "Name Surname" prefix of "Name Surname_number".
 """
 
 import json
@@ -27,7 +31,7 @@ from warnings import warn
 
 
 def ipynb2py(directory='.'):
-        if len(directory)==1:
+        if not isinstance(directory, list):
                 files = glob(path.join(directory,'**','*.ipynb'), recursive=True)
         else:
                 files = []
@@ -55,8 +59,17 @@ def ipynb2py(directory='.'):
                                                 of.write('\n\n')
 
 
-def getname(file_path):
+def get_folder_name(file_path):
         return path.basename(path.dirname(file_path)).split('_')[0]
+
+def get_filename_identity(file_path):
+        import re
+        match = re.match(r'^(.+?)_(\d+)(.*)$', path.splitext(path.basename(file_path))[0])
+        if not match:
+                raise ValueError(
+                        f'Expected filename to begin with "Name Surname_number": {path.basename(file_path)}')
+        return match.group(1)
+
 
 def get_snippet_to_compare(file_path, cellnum=0):
         with open(file_path, 'r', encoding='utf8') as f:
@@ -89,27 +102,62 @@ def diffdir(directory='.', filetype='.py', numexc=2, cellnum=0, savedir='.'):
         import pandas as pd
         import numpy as np
         import re
-        from seaborn import heatmap
         from matplotlib import pyplot as plt
-        if len(directory)==1:
+        if not isinstance(directory, list):
                 files = glob(path.join(directory,'**','*'+filetype), recursive=True)
-                nlab = int(re.search('(Lab) (\d)', directory).group(2))
+                lab_match = re.search('[lL]ab(\\d+)', directory)
+                nlab = int(lab_match.group(1)) if lab_match else None
         else:
                 files = []
                 nlab = None
                 for d in directory:
                         files = files + glob(path.join(d,'**','*'+filetype), recursive=True)
-                        tmp_nlab = int(re.search('(Lab) (\d)', d).group(2))
-                        nlab = tmp_nlab if nlab is None else nlab
-                        assert nlab == tmp_nlab, 'Compared files must be from the same class'
+                        lab_match = re.search('[lL]ab(\\d+)', d)
+                        if lab_match:
+                                tmp_nlab = int(lab_match.group(1))
+                                nlab = tmp_nlab if nlab is None else nlab
+                                assert nlab == tmp_nlab, 'Compared files must be from the same class'
+        filename_mode_done = False
         for z in range(numexc):
-                file = 'Lab'+str(nlab)+'_zad'+str(z+1)
-                z_files = [f for f in files if re.search('[lL]ab'+str(nlab)+'_[zZ]ad'+str(z+1),
-                                                         path.basename(f))]
-                names = [getname(f) for f in z_files]
+                file = ('Lab'+str(nlab) if nlab is not None else 'Files')+'_zad'+str(z+1)
+                folder_files = []
+                if nlab is not None:
+                        folder_files = [f for f in files if re.search(
+                                '[lL]ab'+str(nlab)+'_[zZ]ad'+str(z+1)+'(?!\\d)',
+                                path.basename(f))]
+                        if not folder_files:
+                                print(f"WARNING: no files found for task {z+1}\nSearching for non-numbered Lab files...")
+                                folder_files = [f for f in files if re.search(
+                                        '[lL]ab'+str(nlab)+'(?:_|$)', path.basename(f))]
+                                print(f"{len(folder_files)} found")
+
+                folder_names = [get_folder_name(f) for f in folder_files]
+                if folder_files and len(set(folder_names)) == len(folder_names):
+                        z_files = folder_files
+                        names = folder_names
+                else:
+                        if filename_mode_done:
+                                continue
+                        filename_files = []
+                        filename_names = []
+                        for f in files:
+                                try:
+                                        name = get_filename_identity(f)
+                                except ValueError:
+                                        continue
+                                filename_files.append(f)
+                                filename_names.append(name)
+                        z_files = filename_files
+                        names = filename_names
+                        if not z_files and folder_files:
+                                raise ValueError(
+                                        'Folder names are not unique and no files match "Name Surname_number"')
+                        filename_mode_done = bool(z_files)
+                if len(set(names)) != len(names):
+                        raise ValueError(f'Submission names must be unique for task {z+1}')
                 df = pd.DataFrame(np.zeros((len(names),len(names))), columns=names, index=names)
-                for f1, f2 in combinations(z_files, 2):
-                        name = (getname(f1), getname(f2))
+                for (f1, name1), (f2, name2) in combinations(zip(z_files, names), 2):
+                        name = (name1, name2)
                         outf = path.join(savedir, '_'.join([file, name[0], name[1]])+'.diff')
                         
                         f1_lines = get_snippet_to_compare(f1, cellnum)
@@ -125,10 +173,35 @@ def diffdir(directory='.', filetype='.py', numexc=2, cellnum=0, savedir='.'):
                         
                         with open(outf, 'w', encoding='utf8') as f:
                                 f.writelines(diff)
-                hm = heatmap(df, annot=True, cmap='magma_r')
-                hm.figure.tight_layout()
+                hm = draw_heatmap(df)
                 plt.savefig(path.join(savedir, file+'_similarity.png'))
                 df.to_csv(path.join(savedir, file+'_similarity.csv'))
+
+
+def draw_heatmap(df):
+        from seaborn import heatmap
+        rows, columns = df.shape
+        figure_width = max(8, columns * 0.75)
+        figure_height = max(6, rows * 0.65)
+        cell_size = min(
+                figure_width / max(columns, 1),
+                figure_height / max(rows, 1))
+        font_size = max(12, cell_size * 15)
+
+        hm = heatmap(
+                df,
+                annot=True,
+                annot_kws={'size': font_size},
+                cmap='magma_r',
+                xticklabels=True,
+                yticklabels=True)
+        hm.set_xticks([index + 0.5 for index in range(columns)])
+        hm.set_yticks([index + 0.5 for index in range(rows)])
+        hm.set_xticklabels(df.columns, rotation=90, fontsize=font_size)
+        hm.set_yticklabels(df.index, fontsize=font_size)
+        hm.figure.set_size_inches(figure_width, figure_height)
+        hm.figure.tight_layout()
+        return hm
 
 
 def main():
@@ -146,13 +219,14 @@ def main():
         if not path.isdir(args.save):
                 mkdir(args.save)
 
-        if args.action == '':
+        if not args.action:
                 ipynb2py(directory=args.dir)
                 diffdir(directory=args.dir, numexc=args.numexc, cellnum=args.cell, savedir=args.save)
-        elif args.action == 'convert':
+        if 'convert' in args.action:
                 ipynb2py(directory=args.dir)
-        elif args.action == 'diff':
-                diffdir(directory=args.dir, filetype=args.filetype, numexc=args.numexc, cellnum=args.cell, savedir=args.save)
+        if 'diff' in args.action:
+                diffdir(directory=args.dir, filetype=args.filetype, numexc=args.numexc, cellnum=args.cell,
+                        savedir=args.save)
 
 if __name__ == '__main__':
         main()

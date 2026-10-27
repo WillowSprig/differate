@@ -23,3 +23,10 @@ Compare the similarity between .py files in the specified directory, starting fr
 Convert and then compare the similarity between .py files in multiple directories:
 
     python differate.py convert diff -d /path/to/dir1 -d /path/to/dir2 -z 2 -s /path/to/save/results
+Compare files in a single directory named with a student name and task number:
+
+    python differate.py diff -d /path/to/submissions
+
+The script uses unique parent-folder names when available. If those names are
+not unique, it identifies submissions from the `Name Surname` prefix in
+filenames of the form `Name Surname_number.py`. The trailing number is ignored.
