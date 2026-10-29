@@ -119,7 +119,8 @@ def diffdir(directory='.', filetype='.py', numexc=2, cellnum=0, savedir='.'):
                                 assert nlab == tmp_nlab, 'Compared files must be from the same class'
         filename_mode_done = False
         for z in range(numexc):
-                file = ('Lab'+str(nlab) if nlab is not None else 'Files')+'_zad'+str(z+1)
+                # file = ('Lab'+str(nlab) if nlab is not None else 'Files')+'_zad'+str(z+1)
+                file = savedir.replace('/','_').replace('\\','_')+'_zad'+str(z+1)
                 folder_files = []
                 if nlab is not None:
                         folder_files = [f for f in files if re.search(
@@ -128,7 +129,7 @@ def diffdir(directory='.', filetype='.py', numexc=2, cellnum=0, savedir='.'):
                         if not folder_files:
                                 print(f"WARNING: no files found for task {z+1}\nSearching for non-numbered Lab files...")
                                 folder_files = [f for f in files if re.search(
-                                        '[lL]ab'+str(nlab)+'(?:_|$)', path.basename(f))]
+                                        '[lL]ab'+str(nlab), path.basename(f))]
                                 print(f"{len(folder_files)} found")
 
                 folder_names = [get_folder_name(f) for f in folder_files]
@@ -174,8 +175,8 @@ def diffdir(directory='.', filetype='.py', numexc=2, cellnum=0, savedir='.'):
                         with open(outf, 'w', encoding='utf8') as f:
                                 f.writelines(diff)
                 hm = draw_heatmap(df)
-                plt.savefig(path.join(savedir, file+'_similarity.png'))
-                df.to_csv(path.join(savedir, file+'_similarity.csv'))
+                plt.savefig(file+'_similarity.png')
+                df.to_csv(file+'_similarity.csv')
 
 
 def draw_heatmap(df):
@@ -193,12 +194,15 @@ def draw_heatmap(df):
                 annot=True,
                 annot_kws={'size': font_size},
                 cmap='magma_r',
+                vmin=0,
+                vmax=1,
                 xticklabels=True,
                 yticklabels=True)
         hm.set_xticks([index + 0.5 for index in range(columns)])
         hm.set_yticks([index + 0.5 for index in range(rows)])
         hm.set_xticklabels(df.columns, rotation=90, fontsize=font_size)
         hm.set_yticklabels(df.index, fontsize=font_size)
+        
         hm.figure.set_size_inches(figure_width, figure_height)
         hm.figure.tight_layout()
         return hm
